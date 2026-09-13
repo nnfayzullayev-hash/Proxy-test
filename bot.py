@@ -12,12 +12,19 @@ import config
 from database import db
 from handlers import start, news, tickets, tests, admin
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 async def handle_ping(request):
     return web.Response(text="Bot ishlab turibdi ✅")
 
 
 async def start_web_server():
+    """Keep-alive veb-server"""
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
@@ -25,32 +32,51 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"Keep-alive veb-server {port}-portda ishga tushdi.")
+    logger.info(f"🌐 Keep-alive server {port}-portda ishga tushdi")
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    logger.info("🤖 Bot ishga tushish boshlandi...")
+    
+    # Database ulaning
+    try:
+        await db.connect()
+    except Exception as e:
+        logger.error(f"❌ Database ulanib bo'lmadi: {e}")
+        return
 
-    await db.connect()
-
+    # Bot va Dispatcher sozlash
     bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Handler'larni ro'yxatga qo'shish
     dp.include_router(admin.router)
     dp.include_router(tickets.router)
     dp.include_router(tests.router)
     dp.include_router(news.router)
     dp.include_router(start.router)
 
+    # Webhook tozalash
     await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Keep-alive server ishga tushirish
     await start_web_server()
 
     try:
-        logging.info("Bot ishga tushdi...")
+        logger.info("📡 Bot polling boshlanmoqda...")
         await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"❌ Bot xatosi: {e}")
     finally:
         await db.close()
+        await bot.session.close()
+        logger.info("✅ Bot yopildi")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("⚠️ Bot qo'lda to'xtatildi")
+    except Exception as e:
+        logger.error(f"❌ Kritik xato: {e}")

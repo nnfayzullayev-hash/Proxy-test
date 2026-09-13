@@ -1,5 +1,4 @@
 import asyncpg
-
 import config
 
 
@@ -8,22 +7,31 @@ class Database:
         self.pool: asyncpg.Pool | None = None
 
     async def connect(self):
-        self.pool = await asyncpg.create_pool(
-            host=config.DB_HOST,
-            port=config.DB_PORT,
-            database=config.DB_NAME,
-            user=config.DB_USER,
-            password=config.DB_PASSWORD,
-            min_size=1,
-            max_size=10,
-        )
-        await self.init_models()
+        """Bazaga ulaning va jadvallarni yaratish"""
+        try:
+            self.pool = await asyncpg.create_pool(
+                host=config.DB_HOST,
+                port=config.DB_PORT,
+                database=config.DB_NAME,
+                user=config.DB_USER,
+                password=config.DB_PASSWORD,
+                min_size=2,
+                max_size=5,
+                command_timeout=10,
+            )
+            print(f"✅ Database ulandi: {config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}")
+            await self.init_models()
+        except Exception as e:
+            print(f"❌ Database ulanib bo'lmadi: {e}")
+            raise
 
     async def close(self):
         if self.pool:
             await self.pool.close()
+            print("✅ Database yopildi")
 
     async def init_models(self):
+        """Jadvallarni yaratish"""
         async with self.pool.acquire() as conn:
             await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -80,9 +88,12 @@ class Database:
                 created_at TIMESTAMP DEFAULT NOW()
             );
             """)
+            
+            # Settings bo'shni to'ldirish
             await conn.execute(
                 "INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
             )
+        print("✅ Jadvallari tayyor")
 
     # ---------- USERS ----------
     async def get_or_create_user(self, telegram_id, first_name, last_name, username):
@@ -91,8 +102,7 @@ class Database:
             if user:
                 return user
             return await conn.fetchrow(
-                """INSERT INTO users (telegram_id, first_name, last_name, username)
-                   VALUES ($1,$2,$3,$4) RETURNING *""",
+                "INSERT INTO users (telegram_id, first_name, last_name, username) VALUES ($1,$2,$3,$4) RETURNING *",
                 telegram_id, first_name, last_name, username
             )
 
@@ -140,16 +150,14 @@ class Database:
     async def create_test(self, name, description, pdf_file_id):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
-                """INSERT INTO tests (name, description, pdf_file_id, status)
-                   VALUES ($1,$2,$3,'draft') RETURNING *""",
+                "INSERT INTO tests (name, description, pdf_file_id, status) VALUES ($1,$2,$3,'draft') RETURNING *",
                 name, description, pdf_file_id
             )
 
     async def set_test_time(self, test_id, start_time):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
-                """UPDATE tests SET start_time=$2, status='active'
-                   WHERE id=$1 RETURNING *""",
+                "UPDATE tests SET start_time=$2, status='active' WHERE id=$1 RETURNING *",
                 test_id, start_time
             )
 
@@ -165,8 +173,7 @@ class Database:
     async def create_ticket(self, ticket_code, user_id, test_id):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
-                """INSERT INTO tickets (ticket_code, user_id, test_id, status)
-                   VALUES ($1,$2,$3,'unused') RETURNING *""",
+                "INSERT INTO tickets (ticket_code, user_id, test_id, status) VALUES ($1,$2,$3,'unused') RETURNING *",
                 ticket_code, user_id, test_id
             )
 
@@ -180,9 +187,7 @@ class Database:
 
     async def mark_ticket_used(self, ticket_id):
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE tickets SET status='used', used_at=NOW() WHERE id=$1", ticket_id
-            )
+            await conn.execute("UPDATE tickets SET status='used', used_at=NOW() WHERE id=$1", ticket_id)
 
     async def list_tickets(self, limit=30):
         async with self.pool.acquire() as conn:
@@ -192,16 +197,13 @@ class Database:
     async def create_submission(self, user_id, test_id, ticket_id, content_type, file_id, text_content):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
-                """INSERT INTO submissions (user_id, test_id, ticket_id, content_type, file_id, text_content)
-                   VALUES ($1,$2,$3,$4,$5,$6) RETURNING *""",
+                "INSERT INTO submissions (user_id, test_id, ticket_id, content_type, file_id, text_content) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
                 user_id, test_id, ticket_id, content_type, file_id, text_content
             )
 
     async def list_submissions(self, limit=20):
         async with self.pool.acquire() as conn:
-            return await conn.fetch(
-                "SELECT * FROM submissions ORDER BY created_at DESC LIMIT $1", limit
-            )
+            return await conn.fetch("SELECT * FROM submissions ORDER BY created_at DESC LIMIT $1", limit)
 
 
 db = Database()
