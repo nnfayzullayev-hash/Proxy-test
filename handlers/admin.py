@@ -30,7 +30,7 @@ async def build_tests_keyboard(prefix: str):
     ])
 
 
-# ---------------- YANGILIK QO'SHISH / O'CHIRISH ----------------
+# ============ YANGILIK QO'SHISH / O'CHIRISH ============
 
 class AddNews(StatesGroup):
     title = State()
@@ -86,7 +86,7 @@ async def del_news_confirm(callback: CallbackQuery):
     await callback.message.delete()
 
 
-# ---------------- TEST QO'SHISH (PDF) ----------------
+# ============ TEST QO'SHISH (PDF) ============
 
 class AddTest(StatesGroup):
     name = State()
@@ -118,6 +118,10 @@ async def add_test_description(message: Message, state: FSMContext):
 
 @router.message(AddTest.pdf, F.document)
 async def add_test_pdf(message: Message, state: FSMContext):
+    if not message.document.mime_type or 'pdf' not in message.document.mime_type.lower():
+        await message.answer("❌ Iltimos, PDF faylni yuboring (boshqa fayl emas).")
+        return
+    
     data = await state.get_data()
     test = await test_service.create_test(data["name"], data["description"], message.document.file_id)
     await message.answer(
@@ -129,10 +133,49 @@ async def add_test_pdf(message: Message, state: FSMContext):
 
 @router.message(AddTest.pdf)
 async def add_test_pdf_wrong(message: Message):
-    await message.answer("Iltimos, PDF faylni hujjat (document) sifatida yuboring.")
+    await message.answer("❌ Iltimos, PDF faylni hujjat (document) sifatida yuboring.")
 
 
-# ---------------- TESTGA VAQT BELGILASH ----------------
+# ============ TEST O'CHIRISH ============
+
+@router.message(Command("deltest"))
+async def del_test_list(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    tests = await test_service.list_tests()
+    if not tests:
+        await message.answer("Hozircha testlar mavjud emas.")
+        return
+    
+    for test in tests:
+        status = "✅ Active" if test["status"] == "active" else "📋 Draft"
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"deltest:{test['id']}")
+        ]])
+        await message.answer(
+            f"📝 <b>{test['name']}</b>\n{status}\nID: {test['id']}",
+            reply_markup=kb
+        )
+
+
+@router.callback_query(F.data.startswith("deltest:"))
+async def del_test_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    
+    test_id = int(callback.data.split(":")[1])
+    
+    try:
+        # Test'ni bazadan o'chirish
+        await db.delete_test(test_id)
+        await callback.answer("✅ Test o'chirildi.")
+        await callback.message.delete()
+    except Exception as e:
+        await callback.answer(f"❌ Xato: {e}")
+
+
+# ============ TESTGA VAQT BELGILASH ============
 
 class SetTestTime(StatesGroup):
     choosing_test = State()
@@ -173,7 +216,7 @@ async def set_test_time_entered(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ---------------- FOYDALANUVCHIGA QO'LDA KOD BERISH ----------------
+# ============ CHIPTA KODI QO'SHISH (QO'LDA) ============
 
 class AddTicketManual(StatesGroup):
     choosing_test = State()
@@ -221,7 +264,7 @@ async def add_ticket_telegram_id(message: Message, state: FSMContext):
 
 
 @router.message(AddTicketManual.entering_code)
-async def add_ticket_code_entered(message: Message, state: FSMContext, bot):
+async def add_ticket_code_entered(message: Message, state: FSMContext):
     code = message.text.strip()
     exists = await db.ticket_code_exists(code)
     if exists:
@@ -232,22 +275,11 @@ async def add_ticket_code_entered(message: Message, state: FSMContext, bot):
     await ticket_service.create_manual_ticket(code, data["target_user_id"], data["test_id"])
     test = await test_service.get_test(data["test_id"])
 
-    try:
-        await bot.send_message(
-            data["target_telegram_id"],
-            f"🎫 Sizga chipta berildi!\n\nTest: {test['name']}\nKod: <code>{code}</code>",
-            parse_mode="HTML",
-        )
-        await message.answer(f"✅ Kod \"{code}\" foydalanuvchiga yuborildi.")
-    except Exception:
-        await message.answer(
-            f"⚠️ Kod bazaga saqlandi (\"{code}\"), lekin foydalanuvchiga xabar yuborib bo'lmadi "
-            "(botni bloklagan yoki hali /start bosmagan bo'lishi mumkin)."
-        )
+    await message.answer(f"✅ Kod \"{code}\" bazaga saqlandi.")
     await state.clear()
 
 
-# ---------------- FOYDALANUVCHIGA AVTOMATIK KOD BERISH ----------------
+# ============ CHIPTA KODI QO'SHISH (AVTOMATIK) ============
 
 class AddUserAuto(StatesGroup):
     choosing_test = State()
@@ -276,7 +308,7 @@ async def add_user_test_chosen(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddUserAuto.entering_telegram_id)
-async def add_user_telegram_id(message: Message, state: FSMContext, bot):
+async def add_user_telegram_id(message: Message, state: FSMContext):
     if not message.text.strip().lstrip("-").isdigit():
         await message.answer("❌ Faqat raqam kiriting.")
         return
@@ -293,21 +325,11 @@ async def add_user_telegram_id(message: Message, state: FSMContext, bot):
     ticket = await ticket_service.create_auto_ticket(user["id"], data["test_id"])
     test = await test_service.get_test(data["test_id"])
 
-    try:
-        await bot.send_message(
-            target_id,
-            f"🎫 Sizga chipta berildi!\n\nTest: {test['name']}\nKod: <code>{ticket['ticket_code']}</code>",
-            parse_mode="HTML",
-        )
-        await message.answer(f"✅ Kod \"{ticket['ticket_code']}\" yaratildi va foydalanuvchiga yuborildi.")
-    except Exception:
-        await message.answer(
-            f"⚠️ Kod \"{ticket['ticket_code']}\" yaratildi, lekin foydalanuvchiga xabar yuborib bo'lmadi."
-        )
+    await message.answer(f"✅ Kod \"{ticket['ticket_code']}\" yaratildi va bazaga saqlandi.")
     await state.clear()
 
 
-# ---------------- KARTA RAQAM VA NIK ----------------
+# ============ KARTA RAQAM VA NIK ============
 
 class SetCard(StatesGroup):
     value = State()
@@ -347,7 +369,7 @@ async def set_nickname_value(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ---------------- JAVOBLAR RO'YXATI ----------------
+# ============ JAVOBLAR RO'YXATI ============
 
 @router.message(Command("javoblar"))
 async def list_submissions(message: Message):
@@ -357,13 +379,14 @@ async def list_submissions(message: Message):
     if not submissions:
         await message.answer("Hozircha javoblar yo'q.")
         return
-    lines = []
+    text = "📋 <b>Kelgan javoblar</b>:\n\n"
     for s in submissions:
         test = await db.get_test(s["test_id"])
         user = await db.get_user_by_id(s["user_id"])
-        lines.append(
-            f"🕓 {s['created_at'].strftime('%d.%m.%Y %H:%M')} | "
-            f"{user['first_name'] if user else '-'} | "
-            f"{test['name'] if test else '-'} | {s['content_type']}"
+        user_name = f"{user['first_name']} {user['last_name'] or ''}".strip() if user else "-"
+        text += (
+            f"🕓 {s['created_at'].strftime('%d.%m %H:%M')} | "
+            f"{user_name} | "
+            f"{test['name'] if test else '-'}\n"
         )
-    await message.answer("\n".join(lines))
+    await message.answer(text)
