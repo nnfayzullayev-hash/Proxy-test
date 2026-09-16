@@ -205,5 +205,14 @@ class Database:
         async with self.pool.acquire() as conn:
             return await conn.fetch("SELECT * FROM submissions ORDER BY created_at DESC LIMIT $1", limit)
 
+    async def delete_test(self, test_id):
+        async with self.pool.acquire() as conn:
+            # Test'ga bog'liq barcha submissions'larni o'chirish
+            await conn.execute("DELETE FROM submissions WHERE test_id=$1", test_id)
+            # Test'ga bog'liq barcha tickets'larni o'chirish
+            await conn.execute("DELETE FROM tickets WHERE test_id=$1", test_id)
+            # Test'ni o'chirish
+            await conn.execute("DELETE FROM tests WHERE id=$1", test_id)
+
 
 db = Database()
