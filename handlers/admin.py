@@ -167,7 +167,6 @@ async def del_test_confirm(callback: CallbackQuery):
     test_id = int(callback.data.split(":")[1])
     
     try:
-        # Test'ni bazadan o'chirish
         await db.delete_test(test_id)
         await callback.answer("✅ Test o'chirildi.")
         await callback.message.delete()
@@ -390,40 +389,3 @@ async def list_submissions(message: Message):
             f"{test['name'] if test else '-'}\n"
         )
     await message.answer(text)
-    # ============ TEST O'CHIRISH ============
-
-@router.message(Command("deltest"))
-async def del_test_list(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    tests = await test_service.list_tests()
-    if not tests:
-        await message.answer("Hozircha testlar mavjud emas.")
-        return
-    
-    for test in tests:
-        status = "✅ Active" if test["status"] == "active" else "📋 Draft"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"deltest:{test['id']}")
-        ]])
-        await message.answer(
-            f"📝 <b>{test['name']}</b>\n{status}\nID: {test['id']}",
-            reply_markup=kb
-        )
-
-
-@router.callback_query(F.data.startswith("deltest:"))
-async def del_test_confirm(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer()
-        return
-    
-    test_id = int(callback.data.split(":")[1])
-    
-    try:
-        # Test'ni bazadan o'chirish
-        await db.delete_test(test_id)
-        await callback.answer("✅ Test o'chirildi.")
-        await callback.message.delete()
-    except Exception as e:
-        await callback.answer(f"❌ Xato: {e}")
