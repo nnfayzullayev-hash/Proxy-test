@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_ping(request):
+    """Keep-alive veb-server"""
     return web.Response(text="Bot ishlab turibdi ✅")
 
 
@@ -33,6 +35,7 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info(f"🌐 Keep-alive server {port}-portda ishga tushdi")
+    return runner
 
 
 async def main():
@@ -41,6 +44,7 @@ async def main():
     # Database ulaning
     try:
         await db.connect()
+        logger.info("✅ Database ulanish muvaffaqiyatli")
     except Exception as e:
         logger.error(f"❌ Database ulanib bo'lmadi: {e}")
         return
@@ -56,20 +60,33 @@ async def main():
     dp.include_router(news.router)
     dp.include_router(start.router)
 
-    # Webhook tozalash
-    await bot.delete_webhook(drop_pending_updates=True)
+    # Webhook tozalash - MUHIM!
+    try:
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url:
+            logger.info(f"⚠️ WebHook hali aktiv: {webhook_info.url}")
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ WebHook tozalandi")
+    except Exception as e:
+        logger.warning(f"WebHook tekshirishda xato: {e}")
     
     # Keep-alive server ishga tushirish
-    await start_web_server()
+    web_runner = None
+    try:
+        web_runner = await start_web_server()
+    except Exception as e:
+        logger.warning(f"Keep-alive server ishga tushmadi: {e}")
 
     try:
         logger.info("📡 Bot polling boshlanmoqda...")
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except Exception as e:
         logger.error(f"❌ Bot xatosi: {e}")
     finally:
         await db.close()
         await bot.session.close()
+        if web_runner:
+            await web_runner.cleanup()
         logger.info("✅ Bot yopildi")
 
 
@@ -77,6 +94,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("⚠️ Bot qo'lda to'xtatildi")
+        logger.info("⚠️ Bot qo'lma to'xtatildi")
     except Exception as e:
         logger.error(f"❌ Kritik xato: {e}")
