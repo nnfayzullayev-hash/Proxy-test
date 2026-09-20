@@ -19,17 +19,13 @@ class TakeTest(StatesGroup):
 
 @router.message(F.text == "📝 Testlar")
 async def ask_ticket_code(message: Message, state: FSMContext):
-    """Foydalanuvchidan chipta kodini so'rash"""
     await message.answer("Chipta (kod)ingizni kiriting:")
     await state.set_state(TakeTest.entering_code)
 
 
 @router.message(TakeTest.entering_code)
 async def code_entered(message: Message, state: FSMContext):
-    """Kodni tekshirish va test topshirish"""
     code = message.text.strip()
-    
-    logger.info(f"Kod tekshirilmoqda: {code}")
     
     # Kodni tekshirish
     ticket, error = await ticket_service.validate_ticket_code(code)
@@ -38,8 +34,6 @@ async def code_entered(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    logger.info(f"Ticket topildi: {ticket}")
-
     # Test'ni olish
     test = await test_service.get_test(ticket["test_id"])
     if not test:
@@ -47,18 +41,15 @@ async def code_entered(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    logger.info(f"Test: {test['name']}, PDF file_id: {test['pdf_file_id']}")
-
-    # Test tayyor bo'lgan bo'lmi tekshirish
+    # Test tayyor bo'lgan bo'lmi
     ready, err_msg = test_service.is_test_ready(test)
     if not ready:
         await message.answer(err_msg)
         await state.clear()
         return
 
-    # PDF file_id bor-yo'qligini tekshirish
+    # PDF file_id bor-yo'q
     if not test["pdf_file_id"]:
-        logger.error(f"Test {test['id']} uchun PDF fayl yo'q")
         await message.answer("❌ Bu test uchun hali PDF fayl yuklanmagan. Admin bilan bog'laning.")
         await state.clear()
         return
@@ -66,7 +57,6 @@ async def code_entered(message: Message, state: FSMContext):
     # Kodni "used" qilish
     try:
         await db.mark_ticket_used(ticket["id"])
-        logger.info(f"Kod '{code}' used qilindi")
     except Exception as e:
         logger.error(f"Kod belgilashda xato: {e}")
         await message.answer(f"❌ Texnik xato: {e}")
@@ -87,30 +77,34 @@ async def code_entered(message: Message, state: FSMContext):
         
         await message.answer_document(
             document=test["pdf_file_id"],
-            caption=(
-                f"📝 <b>{test['name']}</b>\n\n"
-                "Testni yeching. Yechib bo'lgach, javobingizni istalgan ko'rinishda "
-                "(rasm, hujjat, matn, video) shu yerga yuboring."
-            )
+            caption=f"📝 <b>{test['name']}</b>"
         )
         
         logger.info("PDF muvaffaqiyatli yuborildi")
-        await state.set_state(TakeTest.waiting_answer)
         
     except Exception as e:
         logger.error(f"PDF yuborib bo'lmadi: {e}", exc_info=True)
-        await message.answer(
-            f"❌ PDF yuborib bo'lmadi.\n\n"
-            f"Xato: {str(e)}\n\n"
-            f"Admin bilan bog'laning."
-        )
+        await message.answer(f"❌ PDF yuborib bo'lmadi. Xato: {str(e)}")
         await state.clear()
         return
+
+    # Namuna ko'rsatish
+    await message.answer(
+        "📌 <b>Javoblarni quyidagi formatda kiritish:</b>\n\n"
+        "1A\n"
+        "2B\n"
+        "3D\n"
+        "4C\n"
+        "5A\n"
+        "...\n\n"
+        "Barchasini kiritganingizdan keyin yuboring ✅"
+    )
+    
+    await state.set_state(TakeTest.waiting_answer)
 
 
 @router.message(TakeTest.waiting_answer)
 async def answer_received(message: Message, state: FSMContext):
-    """Foydalanuvchining javobini qabul qilish"""
     data = await state.get_data()
     user = await db.get_user_by_telegram_id(message.from_user.id)
 
@@ -119,36 +113,11 @@ async def answer_received(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    content_type = message.content_type
-    file_id = None
-    text_content = None
-
-    logger.info(f"Javob turi: {content_type}")
-
-    # Turli xil format'larni qabul qilish
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        content_type = "photo"
-    elif message.document:
-        file_id = message.document.file_id
-        content_type = "document"
-    elif message.video:
-        file_id = message.video.file_id
-        content_type = "video"
-    elif message.voice:
-        file_id = message.voice.file_id
-        content_type = "voice"
-    elif message.audio:
-        file_id = message.audio.file_id
-        content_type = "audio"
-    elif message.animation:
-        file_id = message.animation.file_id
-        content_type = "animation"
-    elif message.text:
-        text_content = message.text
-        content_type = "text"
-    else:
-        await message.answer("❌ Noto'g'ri format. Rasm, hujjat, video, ovoz yoki matn yuboring.")
+    # Javobni matn sifatida qabul qilish
+    text_content = message.text.strip()
+    
+    if not text_content:
+        await message.answer("❌ Javob kiritingiz")
         return
 
     # Javobni bazaga saqlash
@@ -157,9 +126,9 @@ async def answer_received(message: Message, state: FSMContext):
             user["id"], 
             data["test_id"], 
             data["ticket_id"], 
-            content_type, 
-            file_id, 
-            text_content
+            "text",  # Har doim matn formatida
+            None,  # file_id yo'q
+            text_content  # Javob matni
         )
         logger.info(f"Javob saqlandi. Submission ID: {submission['id']}")
     except Exception as e:
@@ -173,14 +142,14 @@ async def answer_received(message: Message, state: FSMContext):
         for admin_id in config.ADMIN_IDS:
             admin_msg = (
                 f"📬 <b>Yangi javob keldi!</b>\n\n"
-                f"👤 Foydalanuvchi: {user['first_name']} {user['last_name'] or ''}\n"
+                f"👤 Foydalanuvchi ID: {user['id']}\n"
                 f"📝 Test: {data['test_name']}\n"
-                f"🎫 Kod: {data['ticket_code']}\n"
-                f"⏰ Vaqt: {submission['created_at'].strftime('%d.%m.%Y %H:%M')}"
+                f"🎫 Kod: {data['ticket_code']}\n\n"
+                f"<b>Javoblar:</b>\n{text_content}"
             )
             await message.bot.send_message(admin_id, admin_msg)
     except Exception as e:
         logger.warning(f"Admin'ga xabar yuborib bo'lmadi: {e}")
 
-    await message.answer("✅ Javobingiz qabul qilindi, rahmat! Admin javobingizni ko'radi.")
+    await message.answer("✅ Javobingiz qabul qilindi, rahmat!")
     await state.clear()
