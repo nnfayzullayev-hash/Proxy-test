@@ -384,8 +384,9 @@ async def list_submissions(message: Message):
         user = await db.get_user_by_id(s["user_id"])
         
         text = (
-            f"👤 Foydalanuvchi ID: {user['id']}\n"
-            f"📝 Test: {test['name'] if test else '-'}\n"
+            f"👤 Telegram ID: {user['telegram_id']}\n"
+            f"📝 Ism: {user['first_name']} {user['last_name'] or ''}\n"
+            f"📊 Test: {test['name'] if test else '-'}\n"
             f"🕓 Vaqt: {s['created_at'].strftime('%d.%m.%Y %H:%M')}\n\n"
             f"<b>Javoblar:</b>\n"
             f"{s['text_content']}\n\n"
