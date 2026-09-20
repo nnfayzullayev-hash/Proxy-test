@@ -374,18 +374,22 @@ async def set_nickname_value(message: Message, state: FSMContext):
 async def list_submissions(message: Message):
     if not is_admin(message.from_user.id):
         return
-    submissions = await db.list_submissions(limit=20)
+    submissions = await db.list_submissions(limit=50)
     if not submissions:
         await message.answer("Hozircha javoblar yo'q.")
         return
-    text = "📋 <b>Kelgan javoblar</b>:\n\n"
+    
     for s in submissions:
         test = await db.get_test(s["test_id"])
         user = await db.get_user_by_id(s["user_id"])
-        user_name = f"{user['first_name']} {user['last_name'] or ''}".strip() if user else "-"
-        text += (
-            f"🕓 {s['created_at'].strftime('%d.%m %H:%M')} | "
-            f"{user_name} | "
-            f"{test['name'] if test else '-'}\n"
+        
+        text = (
+            f"👤 Foydalanuvchi ID: {user['id']}\n"
+            f"📝 Test: {test['name'] if test else '-'}\n"
+            f"🕓 Vaqt: {s['created_at'].strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"<b>Javoblar:</b>\n"
+            f"{s['text_content']}\n\n"
+            f"{'─' * 50}\n"
         )
-    await message.answer(text)
+        
+        await message.answer(text)
